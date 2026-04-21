@@ -89,7 +89,7 @@ int commit_serialize(const Commit *commit, void **data_out, size_t *len_out) {
                   "author %s %" PRIu64 "\n"
                   "committer %s %" PRIu64 "\n"
                   "\n"
-                  "%s",
+                  "%s\n",
                   commit->author, commit->timestamp,
                   commit->author, commit->timestamp,
                   commit->message);
@@ -194,8 +194,47 @@ int head_update(const ObjectID *new_commit) {
 //
 // Returns 0 on success, -1 on error.
 int commit_create(const char *message, ObjectID *commit_id_out) {
-    // TODO: Implement commit creation
-    // (See Lab Appendix for logical steps)
-    (void)message; (void)commit_id_out;
-    return -1;
+    // Step 1: Build tree from index
+    ObjectID tree_id;
+    if (tree_from_index(&tree_id) != 0) {
+        fprintf(stderr, "error: nothing staged to commit\n");
+        return -1;
+    }
+
+    // Step 2: Fill in the Commit struct
+    Commit c;
+    memset(&c, 0, sizeof(c));
+    c.tree = tree_id;
+    c.timestamp = (uint64_t)time(NULL);
+    strncpy(c.author, pes_author(), sizeof(c.author) - 1);
+    strncpy(c.message, message, sizeof(c.message) - 1);
+	c.message[sizeof(c.message) - 1] = '\0';
+// Strip trailing newline if present
+	size_t msg_len = strlen(c.message);
+	if (msg_len > 0 && c.message[msg_len - 1] == '\n')
+    		c.message[msg_len - 1] = '\0';
+
+    // Step 3: Read parent commit (may not exist for first commit)
+    ObjectID parent_id;
+    if (head_read(&parent_id) == 0) {
+        c.has_parent = 1;
+        c.parent = parent_id;
+    } else {
+        c.has_parent = 0;
+    }
+
+    // Step 4: Serialize commit to text
+    void *data;
+    size_t len;
+    if (commit_serialize(&c, &data, &len) != 0) return -1;
+
+    // Step 5: Write commit object
+    if (object_write(OBJ_COMMIT, data, len, commit_id_out) != 0) {
+        free(data);
+        return -1;
+    }
+    free(data);
+
+    // Step 6: Update HEAD to point to new commit
+    return head_update(commit_id_out);
 }
